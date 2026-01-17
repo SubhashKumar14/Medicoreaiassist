@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+torch
+torchvision
+numpy
+joblib
+spacy
+pillow
+python-multipart
+requests
+google-generativeai
+opencv-python-headless
+pytesseract
+pdf2image
+scikit-learn
