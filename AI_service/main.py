@@ -66,12 +66,13 @@ class InferenceEngine:
     """
     Inference engine using trained Scikit-learn model (medicore_model_v4.pkl)
     """
-    def __init__(self, model_path=None, synonyms_path=None, medicine_rules=None, red_flags=None):
+    def __init__(self, model_path=None, synonyms_path=None, medicine_rules=None, red_flags=None, symptom_list=None):
         self.model_path = model_path or os.path.join(KNOW_PATH, "medicore_model_v4.pkl")
         self.synonyms_path = synonyms_path or os.path.join(KNOW_PATH, "synonyms.json")
         self.medicine_rules = safe_load_json(medicine_rules or os.path.join(KNOW_PATH, "medicine_rules.json"))
         self.red_flags = safe_load_json(red_flags or os.path.join(KNOW_PATH, "red_flags.json"))
         self.synonyms = safe_load_json(self.synonyms_path)
+        self.symptom_list = safe_load_json(symptom_list or os.path.join(KNOW_PATH, "symptom_list.json"))
         
         self.model = None
         self.vectorizer = None
@@ -110,13 +111,21 @@ class InferenceEngine:
         return []
 
     def normalize_text(self, text: str) -> List[str]:
-        # Simple extraction for now - could be improved with Named Entity Recognition (NER)
-        # or just simple keyword matching from synonyms
+        # Improved Extraction using strictly controlled vocabulary i.e. symptom_list
         if not text: return []
         text_low = text.lower()
         found = set()
         
-        # Keyword matching
+        # 1. Check strict symptom list (primary source of truth)
+        if isinstance(self.symptom_list, list):
+            for s in self.symptom_list:
+                # Symptom in list: "stiff_neck", Text: "I have a stiff neck"
+                # Check with spaces
+                readable = s.replace("_", " ")
+                if readable in text_low or s in text_low:
+                    found.add(s)
+
+        # 2. Keyword matching from Synonyms (legacy/fallback)
         for canon, variants in self.synonyms.items():
             for v in variants + [canon]:
                 if v in text_low:
@@ -161,7 +170,7 @@ class InferenceEngine:
                         for feat, score in sorted_feats:
                             if feat not in extracted and score > 0:
                                 next_questions.append(feat)
-                                if len(next_questions) >= 3: break
+                                if len(next_questions) >= 20: break
         except Exception as e:
             print(f"Error generating next questions: {e}")
 

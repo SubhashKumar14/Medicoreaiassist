@@ -48,14 +48,14 @@ const triageAPI = {
       method: "POST"
     });
   },
-  submitSymptoms: async (sessionId, symptoms) => {
+  submitSymptoms: async (sessionId, symptoms, answer = null) => {
     return makeRequest(`${API_BASE_URL}/triage/submit`, {
       method: "POST",
-      body: JSON.stringify({ sessionId, symptoms })
+      body: JSON.stringify({ sessionId, symptoms, answer })
     });
   },
   answerQuestion: async (sessionId, answer) => {
-    return makeRequest(`${API_BASE_URL}/triage/answer`, {
+    return makeRequest(`${API_BASE_URL}/triage/submit`, { // Unified endpoint
       method: "POST",
       body: JSON.stringify({ sessionId, answer })
     });

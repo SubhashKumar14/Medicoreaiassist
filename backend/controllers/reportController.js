@@ -43,40 +43,53 @@ exports.uploadReport = async (req, res) => {
         });
 
         // 3. Transform Data for Frontend
-        const aiData = aiResponse.data;
+        const responseBody = aiResponse.data; // { success: true, data: { findings: [], raw_text: "" } }
+        const aiData = responseBody.data || {}; // Inner data object
 
         const abnormalValues = [];
         const normalValues = [];
         const recommendations = [];
 
-        if (aiData.extracted_vitals) {
-            aiData.extracted_vitals.forEach(vital => {
-                const item = {
-                    parameter: vital.test,
-                    value: `${vital.value} ${vital.unit}`,
-                    normalRange: vital.reference,
-                    severity: vital.status === 'Normal' ? 'low' : 'high',
-                    trend: vital.status === 'Low' ? 'down' : (vital.status === 'High' ? 'up' : 'stable')
-                };
+        // Map 'findings' (AI Service) to 'extracted' dictionary for O(1) access in UI
+        const vitals = aiData.findings || [];
+        const extracted = {};
 
-                if (vital.status !== 'Normal') {
-                    abnormalValues.push(item);
-                    recommendations.push(`Consult doctor regarding abnormal ${vital.test} levels.`);
-                } else {
-                    normalValues.push(item);
-                }
-            });
-        }
+        vitals.forEach(vital => {
+            // Standardize format
+            extracted[vital.test] = {
+                value: vital.value,
+                unit: vital.unit || "",
+                status: (vital.status || "NORMAL").toUpperCase(),
+                reference: vital.reference || ""
+            };
+
+            const item = {
+                parameter: vital.test,
+                value: `${vital.value} ${vital.unit || ''}`,
+                normalRange: vital.reference,
+                severity: (vital.status || '').toLowerCase() === 'normal' ? 'low' : 'high',
+                trend: (vital.status || '').toLowerCase() === 'low' ? 'down' : 'up' // Simplified trend logic
+            };
+
+            if (item.severity === 'high') {
+                abnormalValues.push(item);
+                recommendations.push(`Consult doctor regarding abnormal ${vital.test} levels.`);
+            } else {
+                normalValues.push(item);
+            }
+        });
 
         if (recommendations.length === 0) {
             recommendations.push("Maintain healthy lifestyle.", "Regular checkups.");
         }
 
         const formattedAnalysis = {
-            summary: aiData.raw_text_snippet ? `Analyzed content from ${originalname}. Found ${abnormalValues.length} abnormal values.` : "Report analyzed.",
+            summary: aiData.raw_text ? `Analyzed content from ${originalname}. Found ${abnormalValues.length} abnormal values.` : "Report analyzed.",
             abnormalities: abnormalValues,
             normalValues: normalValues,
-            recommendations: recommendations
+            recommendations: recommendations,
+            extracted: extracted, // <--- New Data-Driven Contract
+            raw_text: aiData.raw_text
         };
 
         report.analysis = formattedAnalysis;

@@ -131,7 +131,11 @@ function AIHealthChat() {
                       </div>
                     )}
                     <div className={`max-w-[70%] ${msg.sender === "user" ? "bg-cyan-600 text-white rounded-2xl rounded-br-sm" : "bg-gray-100 text-gray-900 rounded-2xl rounded-bl-sm"} px-4 py-3`}>
-                      <p className="text-sm">{msg.message}</p>
+                      {msg.sender === "ai" && msg.id === messages[messages.length - 1].id ? (
+                        <Typewriter text={msg.message} />
+                      ) : (
+                        <p className="text-sm">{msg.message}</p>
+                      )}
                       <span className={`text-xs mt-1 block ${msg.sender === "user" ? "text-cyan-100" : "text-gray-500"}`}>
                         {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </span>
@@ -157,9 +161,6 @@ function AIHealthChat() {
                     size="sm"
                     onClick={() => {
                       setInputMessage(question);
-                      // handleSendMessage() is called via Effect or slightly modified logic if needed, but here we just populate input
-                      // Or better, directly send:
-                      // But state update acts async, so better to update input and let user press send or pass arg to send
                     }}
                     className="text-xs"
                   >
@@ -187,11 +188,7 @@ function AIHealthChat() {
           </Card>
         </div>
 
-        {/* Right Panel - Removed static disease info as it was hardcoded for "Common Cold" only. 
-         Ideally this should be populated by AI context or removed. 
-         For now, keeping it clean or we could add a "Context" panel if we had structured data. 
-         Leaving a placeholder or removing to simplify. 
-         Let's keep a simplified Info panel. */}
+        {/* Right Panel */}
         <div className="space-y-6">
           <Card className="bg-gradient-to-br from-cyan-50 to-teal-50 border-cyan-200">
             <CardHeader>
@@ -210,6 +207,29 @@ function AIHealthChat() {
       </div>
     </div>
   );
+}
+
+// Simple Typewriter Component
+function Typewriter({ text }) {
+  const [displayedText, setDisplayedText] = useState("");
+
+  useEffect(() => {
+    if (!text) return;
+    setDisplayedText(""); // Reset on new text
+    let i = 0;
+    const timer = setInterval(() => {
+      if (i < text.length) {
+        setDisplayedText((prev) => prev + text.charAt(i));
+        i++;
+      } else {
+        clearInterval(timer);
+      }
+    }, 15); // Adjust speed here (ms)
+
+    return () => clearInterval(timer);
+  }, [text]);
+
+  return <p className="text-sm">{displayedText}</p>;
 }
 
 export { AIHealthChat };

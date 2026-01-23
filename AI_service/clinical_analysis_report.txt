@@ -1,0 +1,38 @@
+=== Clinical Data Analysis Report ===
+
+Total Patients: 30
+Average Follow-up/Survival Time: 1637.97 days
+Mortality Rate (during study): 70.00%
+
+Distribution by Sex:
+sex
+M    16
+F    14
+
+Distribution by Race:
+race
+W    21
+B     7
+O     1
+A     1
+
+Distribution by Stage:
+Stage
+T2N0         7
+PT1PN0       5
+T1N0         3
+PT2PN0       3
+pT2NOMX      1
+pT2N2MX      1
+T2N1MX       1
+T2N2MX       1
+T1NOMX       1
+pT2pN0       1
+T2NOMX       1
+pT1pN0       1
+PT2PN1       1
+ pT3N0Mx     1
+PT3PN0       1
+PT4PN1       1
+
+[Lifelines] Library not found. Skipping advanced survival analysis.

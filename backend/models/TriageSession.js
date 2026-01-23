@@ -15,7 +15,12 @@ const TriageSessionSchema = new mongoose.Schema({
 
     symptomsConfirmed: [String],
 
-    questionsAsked: [String],
+    questionsAsked: [{
+        symptomId: String,
+        text: String,
+        type: { type: String, default: 'yes_no' },
+        options: [String]
+    }],
 
     aiPredictions: [
         {

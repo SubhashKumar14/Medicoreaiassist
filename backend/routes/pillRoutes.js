@@ -29,7 +29,24 @@ router.post('/identify', upload.single('image'), async (req, res) => {
         // Cleanup
         fs.unlinkSync(req.file.path);
 
-        res.json(aiResponse.data);
+        // Transform response to Data-Driven contract
+        const aiData = aiResponse.data.data; // { pill_name: "...", confidence: 0.99 }
+
+        const contract = {
+            visual_predictions: [
+                {
+                    label: aiData.pill_name,
+                    confidence: aiData.confidence
+                }
+            ],
+            ocr_text: aiData.pill_name.toUpperCase(), // Mock OCR for now using verified name
+            final_match: {
+                drug: aiData.pill_name,
+                confidence: aiData.confidence
+            }
+        };
+
+        res.json(contract);
 
     } catch (error) {
         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);

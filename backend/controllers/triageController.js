@@ -38,11 +38,16 @@ exports.startSession = async (req, res) => {
             });
         }
 
+        // Return standardized contract
+        // Initial state: No question yet, or specific first question "Describe symptoms" handled by frontend?
+        // Frontend "Input" step handles the first free-text entry.
+        // So we just return success and session ID.
+        // If we wanted the AI to start with a question, we'd do it here.
+
         res.status(200).json({
-            sessionId: session._id,
+            session_id: session._id,
             status: session.status,
-            message: 'Session started',
-            lastQuestion: session.questionsAsked.length > 0 ? session.questionsAsked[session.questionsAsked.length - 1] : null
+            message: 'Session started'
         });
     } catch (error) {
         console.error("Start Session Error:", error);
@@ -55,7 +60,7 @@ exports.startSession = async (req, res) => {
 // @access  Private
 exports.submitSymptoms = async (req, res) => {
     try {
-        const { sessionId, symptoms } = req.body;
+        const { sessionId, symptoms, answer } = req.body; // 'symptoms' is raw text (start), 'answer' is for specific questions
         const config = await getAIConfig();
 
         if (!config.symptomChecker.enabled) {
@@ -67,25 +72,42 @@ exports.submitSymptoms = async (req, res) => {
             return res.status(404).json({ message: 'Active session not found' });
         }
 
-        // Handle Yes/No context from previous question
-        let inputToAI = symptoms;
-        let lastQ = session.questionsAsked.length > 0 ? session.questionsAsked[session.questionsAsked.length - 1] : null;
+        let inputToAI = "";
+        let confirmedList = session.symptomsConfirmed || [];
 
-        if (lastQ && (symptoms.toLowerCase() === 'yes' || symptoms.toLowerCase() === 'no')) {
-            // If answer is yes/no, we need to associate it with the last question (symptom)
-            // But we don't know strictly if lastQuestion was a symptom name.
-            // We'll rely on AI being smart enough or we append context: "User has <lastQ>"
-            if (symptoms.toLowerCase() === 'yes') {
-                inputToAI = lastQ; // Treat as confirming the symptom
-            } else {
-                inputToAI = ""; // Treat as ignoring/denying
+        // Determine input context
+        if (symptoms) {
+            // Initial free-text symptom description
+            inputToAI = symptoms;
+        } else if (answer !== undefined) {
+            // Answering a specific question
+            const lastQ = session.questionsAsked[session.questionsAsked.length - 1];
+            if (lastQ) {
+                // Logic depends on question type. 
+                // For now, our AI only generated "Yes/No" style symptom checks.
+                // If answer is "yes" (or true), we append the symptom.
+                // If the question was "Do you have X?", lastQ.text might be "Do you have X?" or just "X" (stored id).
+                // We need to store the raw symptom ID in questionsAsked to be robust.
+
+                // Backend fix: use symptomId to avoid Mongoose .id virtual conflict
+                const symptomId = lastQ.symptomId || lastQ.id || lastQ; // Fallback
+
+                console.log(`[Triage] Answer received for: ${symptomId}, Answer: ${answer}`);
+
+                if (answer === 'yes' || answer === true || answer === 'Yes') {
+                    inputToAI = symptomId;
+                } else {
+                    inputToAI = ""; // Negative answer, don't add to confirmed symptoms
+                }
             }
         }
 
         // 1. Call AI Service
+        // AI Service expects: text, confirmed_symptoms (list of strings)
+        // It returns: extracted_symptoms, next_questions (candidates)
         let payload = {
             text: inputToAI,
-            confirmed_symptoms: session.symptomsConfirmed,
+            confirmed_symptoms: confirmedList,
             session_id: sessionId
         };
 
@@ -98,7 +120,9 @@ exports.submitSymptoms = async (req, res) => {
         const aiData = aiResponse.data.data;
 
         // 2. Update Session State
-        session.symptomsConfirmed = [...new Set([...session.symptomsConfirmed, ...aiData.extracted_symptoms])];
+        const newSymptoms = aiData.extracted_symptoms || [];
+        // Merge uniq
+        session.symptomsConfirmed = [...new Set([...confirmedList, ...newSymptoms])];
 
         // Update predictions
         let preds = [];
@@ -118,36 +142,71 @@ exports.submitSymptoms = async (req, res) => {
         const isEmergency = aiData.red_flags && aiData.red_flags.length > 0;
 
         let responsePayload = {
-            sessionId: session._id,
-            status: "IN_PROGRESS",
-            identified_symptoms: session.symptomsConfirmed,
-            diagnosis: session.aiPredictions
+            session_id: session._id,
+            status: "IN_PROGRESS"
         };
 
+        // STOP CONDITIONS
         if (isEmergency) {
             session.status = "ESCALATED";
             session.severity = "critical";
             responsePayload.status = "ESCALATED";
-            responsePayload.message = "Critical symptoms detected. Please seek immediate medical attention.";
-            responsePayload.red_flags = aiData.red_flags;
+            responsePayload.stop_reason = "emergency";
+            responsePayload.final_results = {
+                triage_level: "Emergency",
+                diagnosis: preds,
+                advice: "Critical symptoms detected. Seek immediate medical attention.",
+                red_flags: aiData.red_flags
+            };
         } else if (isConfident || maxQuestionsReached) {
             session.status = "COMPLETED";
             session.completedAt = Date.now();
             responsePayload.status = "COMPLETED";
-            responsePayload.message = "Analysis complete.";
-            responsePayload.recommendation = "Please consult a doctor for further evaluation.";
+            responsePayload.stop_reason = isConfident ? "confidence_threshold" : "max_questions";
+            responsePayload.final_results = {
+                triage_level: "Consultation Recommended",
+                diagnosis: preds,
+                advice: "Based on your symptoms, we recommend a consultation."
+            };
         } else {
-            // Pick next question
-            let nextQ = aiData.next_questions && aiData.next_questions.length > 0 ? aiData.next_questions[0] : null;
+            // CONTINUE - NEXT QUESTION
+            // AI service returns "next_questions" as list of strings (symptoms to ask about)
+            const availableQuestions = aiData.next_questions || [];
 
-            if (nextQ) {
-                session.questionsAsked.push(nextQ); // Log specifically what we asked
-                responsePayload.next_question = nextQ;
-                responsePayload.message = `Do you also experience ${nextQ}?`;
+            // Filter out questions that have already been asked to prevent looping
+            // Check against symptomId
+            const alreadyAskedIds = session.questionsAsked.map(q => q.symptomId || q.id || q).filter(Boolean);
+
+            console.log(`[Triage] Already Asked: ${JSON.stringify(alreadyAskedIds)}`);
+            console.log(`[Triage] AI Suggested: ${JSON.stringify(availableQuestions)}`);
+
+            const nextSymptom = availableQuestions.find(s => !alreadyAskedIds.includes(s));
+
+            if (nextSymptom) {
+                // Construct Dynamic Question Object
+                // We default to yes_no for symptom checks, but structure supports others
+                const questionObj = {
+                    symptomId: nextSymptom, // Symptom key (RENAMED from id)
+                    text: `Do you also experience ${nextSymptom.replace(/_/g, ' ')}?`,
+                    type: "yes_no",
+                    options: ["Yes", "No"]
+                };
+
+                // Advanced: if we wanted to ask "How long?" for a specific symptom, we could inject it here
+                // e.g. if (nextSymptom === 'fever') { ... type: 'choice', options: ['<1 day', '2-3 days'] ... }
+
+                session.questionsAsked.push(questionObj);
+                responsePayload.next_question = questionObj;
             } else {
+                // No more questions from AI -> Complete
                 session.status = "COMPLETED";
                 responsePayload.status = "COMPLETED";
-                responsePayload.message = "Analysis complete.";
+                responsePayload.stop_reason = "no_more_questions";
+                responsePayload.final_results = {
+                    triage_level: "Self Care",
+                    diagnosis: preds,
+                    advice: "No specific condition identified. Monitor your symptoms."
+                };
             }
         }
 
